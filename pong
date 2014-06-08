@@ -1,0 +1,206 @@
+#!/usr/bin/env ruby
+
+require 'gosu'
+
+# Rectangular game object.
+class Rect
+  attr_reader :x, :y, :width, :height
+
+  def initialize(x, y, width, height, color)
+    @x, @y = x, y
+    @width, @height = width, height
+    @color = color
+  end
+
+  def draw_args
+    x1, y1 = @x - @width / 2, @y - @height / 2
+    x2, y2 = @x + @width / 2, @y + @height / 2
+    [x1, y1, x2, y2, @color]
+  end
+
+  def intersect?(other)
+    [@x + @width / 2 > other.x - other.width / 2,
+     @x - @width / 2 < other.x + other.width / 2,
+     @y + @height / 2 > other.y - other.height / 2,
+     @y - @height / 2 < other.y + other.height / 2].all?
+  end
+end
+
+# A player's paddle.
+class Paddle < Rect
+  COLOR = Gosu::Color.new(0xff00ff00)
+  SPEED = 5
+  WIDTH, HEIGHT = [20, 80]
+
+  def initialize(x)
+    super(x, GameWindow::HEIGHT / 2, WIDTH, HEIGHT, COLOR)
+    @move_method = nil
+  end
+
+  def move(method)
+    @move_method = method
+    send(method) if method
+  end
+
+  def velocity
+    case @move_method
+    when :up then -Paddle::SPEED
+    when :down then Paddle::SPEED
+    else 0
+    end
+  end
+
+  private
+
+  def up
+    @y = [@height / 2, @y - SPEED].max
+  end
+
+  def down
+    @y = [GameWindow::HEIGHT - @height / 2, @y + SPEED].min
+  end
+end
+
+# The ball. Yes, it's a square ball.
+class Ball < Rect
+  COLOR = Gosu::Color.new(0xffff0000)
+  INITIAL_SPEED = 2
+  WIDTH, HEIGHT = [15, 15]
+
+  def initialize(x, y)
+    super(x, y, WIDTH, HEIGHT, COLOR)
+    @x_velocity = INITIAL_SPEED * (rand < 0.5 ? 1 : -1)
+    @y_velocity = INITIAL_SPEED * (rand - 0.5)
+    @elapsed_seconds = 0
+  end
+
+  def update(delta_seconds)
+    @elapsed_seconds += delta_seconds
+    speed_multiplier = 1 + @elapsed_seconds / 15
+    return if @elapsed_seconds < 1
+    @x += @x_velocity * speed_multiplier
+    @y += @y_velocity * speed_multiplier
+    wall_bounce_check
+  end
+
+  def hit(paddle_velocity)
+    if (@x_velocity > 0) == (@x > GameWindow::WIDTH / 2)
+      @x_velocity *= -1
+      @y_velocity = (@y_velocity * 3 + paddle_velocity) / 4
+      true
+    else
+      false
+    end
+  end
+
+  def in_bounds?
+    @x.between?(0, GameWindow::WIDTH)
+  end
+
+  private
+
+  def wall_bounce_check
+    min_y, max_y = @height / 2, GameWindow::HEIGHT - @height / 2
+    if @y.between?(min_y, max_y)
+      false
+    else
+      @y_velocity *= -1
+      true
+    end
+  end
+end
+
+# Pong game window.
+class GameWindow < Gosu::Window
+  WIDTH, HEIGHT = [640, 480]
+
+  def initialize
+    super(WIDTH, HEIGHT, false)
+    self.caption = 'pong'
+    init_rects
+    init_audio
+    @previous_time = Time.now
+    @font = Gosu::Font.new(self, 'sans', 20)
+    @scores = [0, 0]
+  end
+
+  private
+
+  def init_rects
+    @paddles = [0.1, 0.9].map do |position|
+      Paddle.new(WIDTH * position)
+    end
+    @computer_direction = nil
+    @ball = Ball.new(WIDTH / 2, HEIGHT / 2)
+  end
+
+  def rects
+    [@paddles, @ball].flatten
+  end
+
+  def init_audio
+    # FIXME: The music stops sometimes for no apparent reason. w h y
+    Gosu::Song.new(self, 'res/music.ogg').play(true)
+    @sound = Gosu::Sample.new(self, 'res/sound.ogg')
+  end
+
+  def handle_player_controls
+    paddle = @paddles[0]
+    paddle.move(nil)
+    paddle.move(:up) if button_down?(Gosu::KbUp)
+    paddle.move(:down) if button_down?(Gosu::KbDown)
+  end
+
+  def handle_computer_controls
+    paddle = @paddles[1]
+    if rand < 0.1
+      @computer_direction =
+        case
+        when @ball.y < paddle.y - paddle.height / 2 then :up
+        when @ball.y > paddle.y + paddle.height / 2 then :down
+        else nil
+        end
+    end
+    paddle.move(@computer_direction)
+  end
+
+  def update
+    current_time = Time.now
+    delta_seconds = current_time - @previous_time
+    @previous_time = current_time
+    handle_player_controls
+    handle_computer_controls
+    @sound.play if @ball.update(delta_seconds) && @ball.in_bounds?
+    collision_test
+    score_test
+  end
+
+  def collision_test
+    @paddles.each do |paddle|
+      next unless paddle.intersect?(@ball)
+      @sound.play if @ball.hit(paddle.velocity)
+    end
+  end
+
+  def score_test
+    return if @ball.x.between?(-WIDTH / 2, WIDTH * 3 / 2)
+    @ball.x < 0 ? @scores[1] += 1 : @scores[0] += 1
+    @ball = Ball.new(WIDTH / 2, HEIGHT / 2)
+  end
+
+  def draw
+    rects.each { |rect| draw_rect(*rect.draw_args) }
+    score_text = "#{@scores[0]} - #{@scores[1]}"
+    @font.draw_rel(score_text, WIDTH / 2, HEIGHT * 0.1, 0, 0.5, 0.5)
+  end
+
+  def draw_rect(x1, y1, x2, y2, color)
+    draw_quad(x1, y1, color,
+              x2, y1, color,
+              x2, y2, color,
+              x1, y2, color)
+  end
+end
+
+window = GameWindow.new
+window.show

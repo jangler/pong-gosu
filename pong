@@ -139,8 +139,8 @@ class GameWindow < Gosu::Window
   end
 
   def init_audio
-    # FIXME: The music stops sometimes for no apparent reason. w h y
-    Gosu::Song.new(self, 'res/music.ogg').play(true)
+    # Should use a Gosu::Song for the music, but that's buggy.
+    Gosu::Sample.new(self, 'res/music.ogg').play(1, 1, true)
     @sound = Gosu::Sample.new(self, 'res/sound.ogg')
   end
 

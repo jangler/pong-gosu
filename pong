@@ -67,6 +67,8 @@ class Ball < Rect
   INITIAL_SPEED = 2
   WIDTH, HEIGHT = [15, 15]
 
+  attr_reader :x_velocity, :y_velocity
+
   def initialize(x, y)
     super(x, y, WIDTH, HEIGHT, COLOR)
     @x_velocity = INITIAL_SPEED * (rand < 0.5 ? 1 : -1)
@@ -76,11 +78,14 @@ class Ball < Rect
 
   def update(delta_seconds)
     @elapsed_seconds += delta_seconds
-    speed_multiplier = 1 + @elapsed_seconds / 15
     return if @elapsed_seconds < 1
     @x += @x_velocity * speed_multiplier
     @y += @y_velocity * speed_multiplier
     wall_bounce_check
+  end
+
+  def speed_multiplier
+    1 + @elapsed_seconds / 15
   end
 
   def hit(paddle_velocity)
@@ -108,6 +113,16 @@ class Ball < Rect
       true
     end
   end
+end
+
+def calculate_bounce(y)
+  until y.between?(0, GameWindow::HEIGHT)
+    case
+    when y < 0 then y *= -1
+    else y = (y - GameWindow::HEIGHT) * -1 + GameWindow::HEIGHT
+    end
+  end
+  y
 end
 
 # Pong game window.
@@ -152,16 +167,44 @@ class GameWindow < Gosu::Window
   end
 
   def handle_computer_controls
-    paddle = @paddles[1]
     if rand < 0.1
-      @computer_direction =
-        case
-        when @ball.y < paddle.y - paddle.height / 2 then :up
-        when @ball.y > paddle.y + paddle.height / 2 then :down
-        else nil
-        end
+      @computer_direction = ARGV.include?('--hard') ? smart_ai : dumb_ai
     end
-    paddle.move(@computer_direction)
+    @paddles[1].move(@computer_direction)
+  end
+
+  def computer_expected_y
+    y_velocity = @ball.y_velocity * @ball.speed_multiplier
+    expected_y = @ball.y + y_velocity * frames_to_impact
+    calculate_bounce(expected_y)
+  end
+
+  def frames_to_impact
+    inter_paddle_distance = @paddles[1].x - @paddles[0].x
+    x_velocity = @ball.x_velocity * @ball.speed_multiplier
+    if x_velocity < 0
+      ((@ball.x - @paddles[0].x) + inter_paddle_distance) / x_velocity
+    else
+      (@paddles[1].x - @ball.x) / x_velocity
+    end
+  end
+
+  def smart_ai
+    paddle = @paddles[1]
+    case
+    when computer_expected_y < paddle.y - paddle.height / 2 then :up
+    when computer_expected_y > paddle.y + paddle.height / 2 then :down
+    else nil
+    end
+  end
+
+  def dumb_ai
+    paddle = @paddles[1]
+    case
+    when @ball.y < paddle.y - paddle.height / 2 then :up
+    when @ball.y > paddle.y + paddle.height / 2 then :down
+    else nil
+    end
   end
 
   def update
